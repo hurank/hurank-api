@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Cursor written by the sync examples
+.hurank-cursor
+
+# Never commit API keys
+.env

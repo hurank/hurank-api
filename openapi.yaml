@@ -1,0 +1,550 @@
+openapi: 3.1.0
+info:
+  title: Hurank API
+  version: 1.0.0-test
+  summary: Check whether a consenting person meets your rating requirement.
+  description: |
+    Hurank is a consensual reputation system: people rate each other from 1 to 5,
+    and only with the consent of the person being rated.
+
+    This API lets an organization (a CRM, an HR platform, a staffing agency portal)
+    connect to the profile of a person **who has agreed to it**, and learn whether
+    that person meets a rating threshold the organization chooses.
+
+    **You never receive the score.** You send a threshold and get back `pass`,
+    `fail` or `no_data`. Disconnecting, rejecting and never having connected all
+    look the same from your side: `no_data`, which is neutral — never "below
+    threshold".
+
+    The API is currently available in **test mode only**. Test keys start with
+    `hk_test_` and operate on a sandbox of fictional people: no real profile is
+    ever reachable with a test key. Live keys (`hk_live_`) will be issued under
+    contract.
+
+    Full documentation: https://www.hurank.com/developers/docs
+  contact:
+    name: Hurank Developers
+    url: https://www.hurank.com/developers
+  license:
+    name: MIT (this specification)
+    identifier: MIT
+servers:
+  - url: https://oxevfjnevbitperkwcoj.supabase.co/functions/v1/hurank-api
+    description: Hurank API (test mode)
+security:
+  - apiKey: []
+tags:
+  - name: Account
+    description: Check that your key works and see its limits.
+  - name: Connections
+    description: A connection links your organization to one consenting person.
+  - name: Status
+    description: The outcome of your threshold for each connection.
+  - name: Sandbox
+    description: |
+      Test-mode only. Simulate what the person would do in the Hurank app —
+      accept, reject, disconnect, change rating or profile data.
+
+paths:
+  /v1/me:
+    get:
+      tags: [Account]
+      summary: Check your API key
+      operationId: getMe
+      responses:
+        '200':
+          description: The key is valid.
+          headers:
+            Hurank-Mode: { $ref: '#/components/headers/Hurank-Mode' }
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimit-Limit' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimit-Remaining' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiKey' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/connections:
+    post:
+      tags: [Connections]
+      summary: Request a connection
+      description: |
+        Starts a connection to the person who gave you their **profile code**.
+        The person receives a request in the Hurank app and decides. There is no
+        way to search for people: a connection always starts from a code the
+        person handed over.
+
+        `first_name`, `last_name` and the outcome are always included. Ask for
+        `profession` and `city` as **required** (the person accepts all or
+        nothing) or **optional** (the person may decline them, now or later).
+        `photo` is never available.
+      operationId: createConnection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConnectionRequest' }
+            example:
+              profile_code: TESTPASS
+              fields:
+                required: [profession]
+                optional: [city]
+      responses:
+        '201':
+          description: Connection created. Its status depends on the person's answer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Connection' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: No profile with this code (`profile_not_found`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: An open connection to this profile already exists (`connection_exists`), or the sandbox is full (`sandbox_limit_reached`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    get:
+      tags: [Connections]
+      summary: List your connections
+      operationId: listConnections
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ConnectionStatus' }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: starting_after
+          in: query
+          description: Cursor — the id of the last connection of the previous page.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [object, data, has_more]
+                properties:
+                  object: { const: list }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Connection' }
+                  has_more: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/connections/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ConnectionId'
+    get:
+      tags: [Connections]
+      summary: Retrieve a connection
+      operationId: getConnection
+      responses:
+        '200':
+          description: The connection.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Connection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Connections]
+      summary: Disconnect from your side
+      description: Idempotent. The connection moves to `no_access`; delete the person's Hurank data from your records.
+      operationId: deleteConnection
+      responses:
+        '200':
+          description: The connection, now `no_access`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Connection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/status:
+    get:
+      tags: [Status]
+      summary: What changed since your last sync
+      description: |
+        The normal way to read outcomes: call it once a day with the `next_since`
+        value from the previous call, and you get only the connections that
+        changed — usually a handful, not your whole list. Omit `since` on the
+        very first call.
+
+        Every row tells you what to store: `pass` or `fail` with the granted
+        `data`, or `no_data` — in which case **delete** the person's Hurank data
+        from your records.
+      operationId: getStatusChanges
+      parameters:
+        - name: threshold
+          in: query
+          required: true
+          description: Your requirement, 1.00 to 5.00 (at most two decimals).
+          schema: { type: string, pattern: '^[1-5](\.[0-9]{1,2})?$', example: '3.50' }
+        - name: since
+          in: query
+          description: The `next_since` of your previous call.
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: Oldest change first. If `has_more` is true, call again with `since = next_since`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/status/batch:
+    post:
+      tags: [Status]
+      summary: Full reconciliation for specific connections
+      description: |
+        Re-read the outcome of up to 100 connections, to recover after an outage.
+        Ids that are not yours come back as `no_data`. In live mode this endpoint
+        will be rate-limited more strictly than `/v1/status`.
+      operationId: getStatusBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threshold, connection_ids]
+              properties:
+                threshold: { type: number, minimum: 1, maximum: 5, example: 3.5 }
+                connection_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: One status per requested id.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/sandbox/connections/{id}/accept:
+    parameters: [{ $ref: '#/components/parameters/ConnectionId' }]
+    post:
+      tags: [Sandbox]
+      summary: The person accepts a pending connection
+      operationId: sandboxAccept
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grant_optional:
+                  description: Optional fields the person grants. Default — all of them.
+                  type: array
+                  items: { $ref: '#/components/schemas/Field' }
+      responses:
+        '200': { $ref: '#/components/responses/ConnectionOk' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+
+  /v1/sandbox/connections/{id}/reject:
+    parameters: [{ $ref: '#/components/parameters/ConnectionId' }]
+    post:
+      tags: [Sandbox]
+      summary: The person rejects a pending connection
+      operationId: sandboxReject
+      responses:
+        '200': { $ref: '#/components/responses/ConnectionOk' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+
+  /v1/sandbox/connections/{id}/revoke:
+    parameters: [{ $ref: '#/components/parameters/ConnectionId' }]
+    post:
+      tags: [Sandbox]
+      summary: The person disconnects an active connection
+      operationId: sandboxRevoke
+      responses:
+        '200': { $ref: '#/components/responses/ConnectionOk' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+
+  /v1/sandbox/connections/{id}/rating:
+    parameters: [{ $ref: '#/components/parameters/ConnectionId' }]
+    post:
+      tags: [Sandbox]
+      summary: Set the person's simulated rating
+      description: Use it to cross your threshold in either direction. `null` means "no votes yet", which never passes.
+      operationId: sandboxRating
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating: { type: [number, 'null'], minimum: 1, maximum: 5, example: 3.2 }
+      responses:
+        '200': { $ref: '#/components/responses/ConnectionOk' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /v1/sandbox/connections/{id}/profile:
+    parameters: [{ $ref: '#/components/parameters/ConnectionId' }]
+    post:
+      tags: [Sandbox]
+      summary: The person edits their profile
+      description: Granted fields are continuous — when the person moves city, you receive the new city.
+      operationId: sandboxProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                first_name: { type: string }
+                last_name: { type: string }
+                profession: { type: [string, 'null'] }
+                city: { type: [string, 'null'] }
+      responses:
+        '200': { $ref: '#/components/responses/ConnectionOk' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /v1/sandbox/connections/{id}/fields:
+    parameters: [{ $ref: '#/components/parameters/ConnectionId' }]
+    post:
+      tags: [Sandbox]
+      summary: The person changes which optional fields they share
+      description: Removing a field means you must delete it from your records. Removing a required field is not possible — that is a disconnection (`revoke`).
+      operationId: sandboxFields
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [granted_optional]
+              properties:
+                granted_optional:
+                  type: array
+                  items: { $ref: '#/components/schemas/Field' }
+      responses:
+        '200': { $ref: '#/components/responses/ConnectionOk' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+
+  /v1/sandbox/reset:
+    post:
+      tags: [Sandbox]
+      summary: Delete all your sandbox connections
+      operationId: sandboxReset
+      responses:
+        '200':
+          description: Sandbox cleared.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  object: { const: sandbox_reset }
+                  deleted: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: 'hk_test_…'
+      description: 'Authorization: Bearer hk_test_… — create test keys at https://www.hurank.com/developers/sandbox'
+
+  parameters:
+    ConnectionId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  headers:
+    Hurank-Mode:
+      description: Always `test` for now.
+      schema: { type: string, enum: [test] }
+    RateLimit-Limit:
+      schema: { type: integer }
+    RateLimit-Remaining:
+      schema: { type: integer }
+
+  schemas:
+    Field:
+      type: string
+      enum: [profession, city]
+
+    ConnectionStatus:
+      type: string
+      enum: [pending, active, no_access]
+      description: |
+        `pending` — waiting for the person. `active` — the person accepted.
+        `no_access` — rejected, disconnected by either side: the reason is never disclosed.
+
+    ConnectionRequest:
+      type: object
+      required: [profile_code]
+      properties:
+        profile_code:
+          type: string
+          description: The 8-character code the person gave you.
+          example: TESTPASS
+        fields:
+          type: object
+          properties:
+            required:
+              type: array
+              items: { $ref: '#/components/schemas/Field' }
+            optional:
+              type: array
+              items: { $ref: '#/components/schemas/Field' }
+
+    Connection:
+      type: object
+      required: [object, id, profile_code, status, fields, created_at, updated_at]
+      properties:
+        object: { const: connection }
+        id: { type: string, format: uuid }
+        profile_code: { type: string }
+        status: { $ref: '#/components/schemas/ConnectionStatus' }
+        fields:
+          type: object
+          properties:
+            required:
+              type: array
+              items: { $ref: '#/components/schemas/Field' }
+            optional:
+              type: array
+              items: { $ref: '#/components/schemas/Field' }
+            granted:
+              description: What you receive today. Empty unless `active`.
+              type: array
+              items: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Status:
+      type: object
+      required: [object, connection_id, result, data]
+      properties:
+        object: { const: status }
+        connection_id: { type: string, format: uuid }
+        profile_code: { type: [string, 'null'] }
+        result:
+          type: string
+          enum: [pass, fail, no_data]
+          description: |
+            `pass` — meets your threshold. `fail` — does not (this includes people
+            with no votes yet). `no_data` — not connected: render it as neutral,
+            never as "below threshold".
+        data:
+          description: Granted fields. `null` when `result` is `no_data` — delete what you stored.
+          type: [object, 'null']
+          properties:
+            first_name: { type: string }
+            last_name: { type: string }
+            profession: { type: [string, 'null'] }
+            city: { type: [string, 'null'] }
+        updated_at: { type: [string, 'null'], format: date-time }
+
+    StatusList:
+      type: object
+      required: [object, threshold, data, has_more]
+      properties:
+        object: { const: list }
+        threshold: { type: number }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Status' }
+        has_more: { type: boolean }
+        next_since:
+          type: [string, 'null']
+          format: date-time
+          description: Store it and pass it as `since` next time.
+
+    ApiKey:
+      type: object
+      properties:
+        object: { const: api_key }
+        mode: { type: string, enum: [test] }
+        name: { type: string }
+        hint: { type: string, example: 'hk_test_…a1b2' }
+        created_at: { type: string, format: date-time }
+        limits:
+          type: object
+          properties:
+            requests_per_minute: { type: integer }
+            sandbox_connections: { type: integer }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [type, code, message]
+          properties:
+            type:
+              type: string
+              enum: [invalid_request_error, authentication_error, permission_error, rate_limit_error, api_error]
+            code: { type: string, example: invalid_threshold }
+            message: { type: string }
+            param: { type: string }
+
+  responses:
+    BadRequest:
+      description: The request is malformed. See `error.code` and `error.param`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing or invalid API key (`missing_api_key`, `invalid_api_key`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Live key used (`live_mode_unavailable`) or owner account suspended (`account_suspended`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: '`connection_not_found` or `route_not_found`.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many requests (`rate_limited`). Wait for `Retry-After` seconds.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidState:
+      description: The action does not apply to the connection's current status (`invalid_state`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ConnectionOk:
+      description: The updated connection.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Connection' }
