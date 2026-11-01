@@ -18,7 +18,9 @@ choose**. Nothing more.
 | Path | What it is |
 |---|---|
 | [`openapi.yaml`](./openapi.yaml) | The OpenAPI 3.1 specification. Generate a client from it, or import it into Postman / Insomnia. |
-| [`examples/curl.sh`](./examples/curl.sh) | Every endpoint, one `curl` at a time. |
+| [`examples/curl.sh`](./examples/curl.sh) | Every endpoint, one `curl` at a time. Test keys only: it drives the sandbox. |
+| [`examples/node/connect.mjs`](./examples/node/connect.mjs) | Request a connection from a profile code and handle every answer (including a mistyped code). Test and live. |
+| [`examples/python/connect.py`](./examples/python/connect.py) | The same in Python 3.9+, standard library only. |
 | [`examples/node/sync.mjs`](./examples/node/sync.mjs) | A daily sync job in Node.js 18+, no dependencies. Start your connector from here. |
 | [`examples/python/sync.py`](./examples/python/sync.py) | The same job in Python 3.9+, standard library only. |
 | [`CONNECTOR_RULES.md`](./CONNECTOR_RULES.md) | The rules every connector must follow. **Read them before you write code.** |

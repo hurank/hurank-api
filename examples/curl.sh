@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 # Every Hurank API endpoint, one curl at a time.
 # Usage: HURANK_API_KEY=hk_test_... sh curl.sh
+# TEST KEYS ONLY: it drives the sandbox. With a live key the /v1/sandbox
+# endpoints answer 403 sandbox_only, and the person answers in the Hurank app.
 # Needs: curl. jq is optional, only to pretty-print and pick ids.
 
 set -e

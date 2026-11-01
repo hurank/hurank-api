@@ -5,6 +5,8 @@ changed since the previous run and applies it to your records.
 
     HURANK_API_KEY=hk_test_... THRESHOLD=3.50 python sync.py
 
+Works unchanged with a live key (hk_live_...): same endpoint, same rows.
+
 Replace the functions in "Your system" with calls to your CRM/HR tool.
 """
 

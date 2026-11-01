@@ -5,6 +5,8 @@
 //
 //   HURANK_API_KEY=hk_test_... THRESHOLD=3.50 node sync.mjs
 //
+// Works unchanged with a live key (hk_live_...): same endpoint, same rows.
+//
 // Replace the three functions in "Your system" with calls to your CRM/HR tool.
 
 import { readFile, writeFile } from 'node:fs/promises'
