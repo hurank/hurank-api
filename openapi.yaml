@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Hurank API
-  version: 1.0.0-test
+  version: 1.1.0
   summary: Check whether a consenting person meets your rating requirement.
   description: |
     Hurank is a consensual reputation system: people rate each other from 1 to 5,
@@ -16,10 +16,13 @@ info:
     look the same from your side: `no_data`, which is neutral — never "below
     threshold".
 
-    The API is currently available in **test mode only**. Test keys start with
-    `hk_test_` and operate on a sandbox of fictional people: no real profile is
-    ever reachable with a test key. Live keys (`hk_live_`) will be issued under
-    contract.
+    Test keys start with `hk_test_` and operate on a sandbox of fictional people:
+    no real profile is ever reachable with a test key. Live keys start with
+    `hk_live_` and reach real people; they are self-service once your
+    organization has a verified domain (DNS TXT record) and has accepted the API
+    terms (https://www.hurank.com/developers/terms). Endpoints and responses are
+    the same in both modes. In live mode a pending request expires after 7 days,
+    and `404 profile_not_found` may simply mean the person mistyped their code.
 
     Full documentation: https://www.hurank.com/developers/docs
   contact:
@@ -30,7 +33,7 @@ info:
     identifier: MIT
 servers:
   - url: https://oxevfjnevbitperkwcoj.supabase.co/functions/v1/hurank-api
-    description: Hurank API (test mode)
+    description: Hurank API (test and live)
 security:
   - apiKey: []
 tags:
@@ -99,7 +102,10 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
-          description: No profile with this code (`profile_not_found`).
+          description: |
+            No profile with this code (`profile_not_found`). In test mode only test
+            profiles exist. In live mode it is a normal answer — the person may have
+            mistyped the code: ask them to check it.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -214,8 +220,7 @@ paths:
       summary: Full reconciliation for specific connections
       description: |
         Re-read the outcome of up to 100 connections, to recover after an outage.
-        Ids that are not yours come back as `no_data`. In live mode this endpoint
-        will be rate-limited more strictly than `/v1/status`.
+        Ids that are not yours come back as `no_data`.
       operationId: getStatusBatch
       requestBody:
         required: true
@@ -368,8 +373,8 @@ components:
     apiKey:
       type: http
       scheme: bearer
-      bearerFormat: 'hk_test_…'
-      description: 'Authorization: Bearer hk_test_… — create test keys at https://www.hurank.com/developers/sandbox'
+      bearerFormat: 'hk_test_… or hk_live_…'
+      description: 'Authorization: Bearer hk_test_… (or hk_live_…) — create keys at https://www.hurank.com/developers/sandbox'
 
   parameters:
     ConnectionId:
@@ -381,7 +386,7 @@ components:
   headers:
     Hurank-Mode:
       description: Always `test` for now.
-      schema: { type: string, enum: [test] }
+      schema: { type: string, enum: [test, live] }
     RateLimit-Limit:
       schema: { type: integer }
     RateLimit-Remaining:
@@ -484,15 +489,24 @@ components:
       type: object
       properties:
         object: { const: api_key }
-        mode: { type: string, enum: [test] }
+        mode: { type: string, enum: [test, live] }
         name: { type: string }
         hint: { type: string, example: 'hk_test_…a1b2' }
+        purpose:
+          type: string
+          description: Live keys only. The reason people read before accepting a connection made with this key.
         created_at: { type: string, format: date-time }
+        organization:
+          description: Live keys only.
+          type: object
+          properties:
+            name: { type: string }
+            domain: { type: string }
         limits:
           type: object
           properties:
             requests_per_minute: { type: integer }
-            sandbox_connections: { type: integer }
+            sandbox_connections: { type: integer, description: Test keys only. }
 
     Error:
       type: object
@@ -521,7 +535,11 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     Forbidden:
-      description: Live key used (`live_mode_unavailable`) or owner account suspended (`account_suspended`).
+      description: |
+        Owner account suspended (`account_suspended`); live key whose organization
+        has no verified domain (`domain_not_verified`) or has not accepted the
+        current terms (`terms_not_accepted`); live key on a sandbox endpoint
+        (`sandbox_only`).
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

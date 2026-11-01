@@ -38,14 +38,13 @@ conditional on fields you declared optional.
 *Why:* optional means the person can say no. If saying no costs them something,
 it was never optional.
 
-## 5. Sync once a day
+## 5. Sync incrementally
 
-Call `GET /v1/status` with `since` once a day. Use `POST /v1/status/batch` only
-to recover after an outage.
+Call `GET /v1/status` with `since`, typically once a day. Use
+`POST /v1/status/batch` only to recover after an outage.
 
 *Why:* outcomes change only when people receive votes, which is slow. Reading
-more often brings nothing new — and in live mode, one read per connected person
-per day is the limit.
+more often brings nothing new, and every key is limited to 60 requests per minute.
 
 ## 6. The decision is yours, never Hurank's
 

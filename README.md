@@ -8,8 +8,10 @@ and only with the consent of the person being rated. With this API your system
 can learn **whether a person who agreed to connect meets a rating threshold you
 choose**. Nothing more.
 
-> **Status: test mode.** Test keys (`hk_test_…`) work today on a sandbox of
-> fictional people. Live keys will be issued under contract.
+> **Test and live.** Test keys (`hk_test_…`) work on a sandbox of fictional
+> people. Live keys (`hk_live_…`) reach real people and are self-service: create
+> your organization, verify your domain, accept the API terms. Same endpoints,
+> same responses — a connector that works in test works in live.
 
 ## What is in this repository
 
@@ -78,6 +80,59 @@ Use the `/v1/sandbox/...` endpoints, or the buttons in the
 [sandbox](https://www.hurank.com/developers/sandbox), to simulate the person:
 accept, reject, disconnect, change rating, change city.
 
+## Going live
+
+Live keys reach real people. Everything happens in the
+[sandbox](https://www.hurank.com/developers/sandbox), and nobody approves it by hand:
+
+1. **Create your organization** — its real name and its domain, one per Hurank
+   account. People see both when you ask to connect (`Acme Staffing · acme.com ✓`).
+2. **Verify the domain** with a DNS TXT record (below).
+3. **Accept the [API terms](https://www.hurank.com/developers/terms)**, then create
+   a live key.
+
+Every live key carries a mandatory **purpose** — one key per system, one purpose
+per key (“Driver selection for the summer season”). People read it next to your
+name before they accept, so write it in their language. Each connection keeps the
+purpose it was requested with.
+
+### Verify your domain
+
+Open the DNS panel of whoever manages your domain (registrar or hosting) and
+**add** a record — don't edit the TXT records already there:
+
+| Field | Value |
+|---|---|
+| Type | `TXT` |
+| Name / Host | `@` — the domain itself (some panels want it empty, or the domain in full) |
+| Value | `hurank-verification=<your token>` — copy it from the sandbox |
+| TTL | default |
+
+Use your registrable domain (`example.com`), not a subdomain or an address on a
+shared platform (`something.vercel.app`). Propagation usually takes minutes,
+sometimes up to 24–48 hours:
+
+```bash
+dig TXT example.com +short
+# Windows: nslookup -type=TXT example.com
+```
+
+Then press **Verify domain** in the sandbox. **Leave the record in place**: it is
+checked again every 30 days, and live keys answer `403 domain_not_verified` if it
+disappears. Changing the domain resets the verification and issues a new token.
+
+Common problems: the record was put on a subdomain (`www`), the value carries
+extra quotes or a partial token, or it was added at a DNS provider your
+nameservers don't point to.
+
+### What changes in live mode
+
+- A request stays `pending` until the person answers in the Hurank app. If nobody
+  answers it **expires after 7 days** and becomes `no_access`; you may ask again.
+- `404 profile_not_found` is a normal answer: the person may have mistyped their
+  code. Ask them to check it and try again.
+- `/v1/sandbox/...` endpoints answer `403 sandbox_only`.
+
 ## Documentation
 
 Full reference, errors and limits: **https://www.hurank.com/developers/docs**
@@ -85,4 +140,5 @@ Full reference, errors and limits: **https://www.hurank.com/developers/docs**
 ## License
 
 The specification and the examples are released under the [MIT license](./LICENSE).
-Writing a connector is open to anyone; reading data requires a key issued by Hurank.
+Writing a connector is open to anyone; reading real data requires a live key, a verified
+domain and the [API terms](https://www.hurank.com/developers/terms).
